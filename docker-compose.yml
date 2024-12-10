@@ -1,0 +1,183 @@
+version: '3.8'
+services:
+  live-streaming-server-a:
+    image: tiangolo/nginx-rtmp
+    build: ./config/live_streaming_server_a
+    container_name: live_streaming_server_a
+    ports:
+      - "1935:1935" # RTMP
+      - "8080:80"   # HTTP (optional for monitoring)
+      - "8081:8080"
+    env_file:
+      - ./.env
+    environment:
+      - SERVER_IP_LIVE_STREAMING_SERVER_A=${SERVER_IP_LIVE_STREAMING_SERVER_A}
+      - SERVER_IP_LIVE_STREAMING_SERVER_B=${SERVER_IP_LIVE_STREAMING_SERVER_B}
+      - SERVER_IP_LIVE_RECORDING_SERVER=${SERVER_IP_LIVE_RECORDING_SERVER}
+      - RECORDING_EXPOSE_PORT=${RECORDING_EXPOSE_PORT:-1937}
+      - RTSP_CAMERA_STREAM_BASE_IP=${RTSP_CAMERA_STREAM_BASE_IP}
+      - RTSP_CAMERA_STREAM_PORT_BASE=${RTSP_CAMERA_STREAM_PORT_BASE:-554}
+      - STREAM_COUNT=${STREAM_COUNT:-4}
+      - START_IP=${START_IP:-100}
+      - LIVE_PORT_EXPOSE_B=${LIVE_PORT_EXPOSE_B:-1936}
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      live_stream_network:
+        ipv4_address: ${SERVER_IP_LIVE_STREAMING_SERVER_A}
+    restart: always
+    command: >
+      bash -c "
+      PULL_LINES='' && 
+      for i in $(seq 0 $((STREAM_COUNT - 1))); do 
+        IP=\"${RTSP_CAMERA_STREAM_BASE_IP}.$((START_IP + i))\" && 
+        PORT=$((RTSP_CAMERA_STREAM_PORT_BASE + i)) && 
+        PULL_LINES+=\"            pull rtmp://${IP}:${PORT}/stream RTSP;\\n\"; 
+      done && 
+      echo -e \"$PULL_LINES\" > /tmp/generated_pull_lines.log && 
+      sed -e 's|{{SERVER_IP_LIVE_STREAMING_SERVER_A}}|${SERVER_IP_LIVE_STREAMING_SERVER_A}|g' \\
+          -e 's|{{SERVER_IP_LIVE_STREAMING_SERVER_B}}|${SERVER_IP_LIVE_STREAMING_SERVER_B}|g' \\
+          -e "s|{{SERVER_IP_LIVE_RECORDING_SERVER}}|${SERVER_IP_LIVE_RECORDING_SERVER}|g" \\
+          -e 's|{{LIVE_PORT_EXPOSE_B}}|${LIVE_PORT_EXPOSE_B}|g' \\
+          -e 's|{{RECORDING_EXPOSE_PORT}}|${RECORDING_EXPOSE_PORT}|g' \\
+          -e 's|{{DYNAMIC_PULL_LINES}}|$(echo -e \"$PULL_LINES\")|g' \\
+          /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+      "
+
+  live-streaming-server-b:
+    image: tiangolo/nginx-rtmp
+    container_name: live_streaming_server_b
+    environment:
+      - SERVER_IP_LIVE_STREAMING_SERVER_A=${SERVER_IP_LIVE_STREAMING_SERVER_A}
+      - SERVER_IP_LIVE_RECORDING_SERVER=${SERVER_IP_LIVE_RECORDING_SERVER}
+      - LIVE_PORT_EXPOSE_A=${LIVE_PORT_EXPOSE_A:-1935}
+      - RECORDING_EXPOSE_PORT=${RECORDING_EXPOSE_PORT:-1937}
+    ports:
+      - "1936:1935"
+      - "8083:80"
+      - "8084:8080"
+    networks:
+      live_stream_network:
+        ipv4_address: ${SERVER_IP_LIVE_STREAMING_SERVER_B}
+    volumes:
+      - ./stream_config:/stream_config
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: always
+    command: >
+      bash -c "
+      apt update && 
+      apt install -y gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly &&
+      ./project/config/live_streaming_server_b/stream.sh
+      "
+
+  live-recording-server:
+    image: jrottenberg/ffmpeg:4.4-ubuntu
+    build: ./config/live_recording_server
+    container_name: live_recording_server
+    environment:
+      - SERVER_IP_LIVE_STREAMING_SERVER_B=${SERVER_IP_LIVE_STREAMING_SERVER_B}
+      - LIVE_PORT_EXPOSE_B=${LIVE_PORT_EXPOSE_B:-1936}
+      - SERVER_IP_LIVE_STREAMING_SERVER_A=${SERVER_IP_LIVE_STREAMING_SERVER_A}
+      - LIVE_PORT_EXPOSE_A=${LIVE_PORT_EXPOSE_A:-1935}
+      - STREAM_URL_B=rtmp://${SERVER_IP_LIVE_STREAMING_SERVER_B}:${LIVE_PORT_EXPOSE_B}/live
+      - STREAM_URL_A=rtmp://${SERVER_IP_LIVE_STREAMING_SERVER_A}:${LIVE_PORT_EXPOSE_A}/live/stream_key_2a
+      - RECORDING_DIR=/recordings
+      - INTERVAL_MINUTES=5
+      - STREAM_ID=default
+    ports:
+      - "1937:1935"
+      - "8084:8080"
+    env_file:
+      - ./.env
+    volumes:
+      - ./stream_config:/stream_config
+      - ./recordings:/recordings
+    networks:
+      live_stream_network:
+        ipv4_address: ${SERVER_IP_LIVE_RECORDING_SERVER}
+    restart: always
+    command: >
+      bash -c "
+      apt update && 
+      apt-get update && apt-get install -y \
+      curl \
+      git && \
+      apt-get clean && rm -rf /var/lib/apt/lists/* &&
+      ./stream_config/ffmpeg.sh
+      "
+
+  live-overlay-server:
+    image: gstreamer/gstreamer:latest
+    build: ./config/live_overlay_server
+    container_name: live_overlay_server
+    environment:
+      - LIVE_PORT_EXPOSE_B=${LIVE_PORT_EXPOSE_B:-1936}
+      - SERVER_IP_LIVE_STREAMING_SERVER_B=${SERVER_IP_LIVE_STREAMING_SERVER_B}
+      - SIGNALING_SERVER_URL=ws://${SERVER_IP_LIVE_STREAMING_SERVER_B}:${LIVE_PORT_EXPOSE_B}/live/stream_key_2a
+    env_file:
+      - ./.env
+    ports:
+      - "8000:8001"
+    networks:
+      live_stream_network:
+        ipv4_address: ${SERVER_IP_LIVE_OVERLAY_SERVER}
+    volumes:
+      - ./web-viewer:/usr/share/nginx/html/
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: always
+    command: >
+      bash -c '
+      sed -e "s|{{SERVER_IP_LIVE_STREAMING_SERVER_B}}|'"${SERVER_IP_LIVE_STREAMING_SERVER_B}"'|g" \
+          -e "s|{{LIVE_PORT_EXPOSE_B}}|'"${LIVE_PORT_EXPOSE_B}"'|g" \
+          /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf &&
+      nginx -g "daemon off"
+      '
+
+  webrtc-client-viewer:
+    image: nginx:alpine
+    build: ./config/webrtc_client_viewer
+    container_name: webrtc_client_viewer
+    environment:
+      - LIVE_PORT_EXPOSE_B=${LIVE_PORT_EXPOSE_B:-1936}
+      - SERVER_IP_LIVE_STREAMING_SERVER_B=${SERVER_IP_LIVE_STREAMING_SERVER_B}
+      - SIGNALING_SERVER_URL=ws://${SERVER_IP_LIVE_STREAMING_SERVER_B}:${LIVE_PORT_EXPOSE_B}/live/stream_key_2a
+    env_file:
+      - ./.env
+    ports:
+      - "8000:8000"
+    networks:
+      live_stream_network:
+        ipv4_address: ${SERVER_IP_WEBRTC_CLIENT_VIEWER}
+    volumes:
+      - ./Server:/usr/share/nginx/html/
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: always
+    command: >
+      bash -c '
+      sed -e "s|{{SERVER_IP_LIVE_STREAMING_SERVER_B}}|'"${SERVER_IP_LIVE_STREAMING_SERVER_B}"'|g" \
+          -e "s|{{LIVE_PORT_EXPOSE_B}}|'"${LIVE_PORT_EXPOSE_B}"'|g" \
+          /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf &&
+      nginx -g "daemon off"
+      '
+
+  video-lan-client-viewer:
+    build: ./config/video_lan_client_viewer
+    container_name: video_lan_client_viewer
+    environment:
+      - SERVER_IP_VIDEO_LAN_CLIENT_VIEWER=${SERVER_IP_VIDEO_LAN_CLIENT_VIEWER}
+    env_file:
+      - ./.env
+    ports:
+      - "8080:8080"
+    networks:
+      live_stream_network:
+        ipv4_address: ${SERVER_IP_VIDEO_LAN_CLIENT_VIEWER}
+    restart: always
+
+networks:
+  live_stream_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+    
