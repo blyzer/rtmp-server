@@ -1,4 +1,4 @@
-FROM gstreamer/gstreamer:latest
+FROM restreamio/gstreamer:x86_64-latest-prod
 
 # Accept build-time argument
 ARG SERVER_IP_LIVE_STREAMING_SERVER_B

@@ -26,21 +26,22 @@ services:
       live_stream_network:
         ipv4_address: ${SERVER_IP_LIVE_STREAMING_SERVER_A}
     restart: always
-    command: >
+    command: |
+      apt-get update && apt-get install -y bash && apt-get clean &&
       bash -c "
-      PULL_LINES='' && 
-      for i in $(seq 0 $((STREAM_COUNT - 1))); do 
-        IP=\"${RTSP_CAMERA_STREAM_BASE_IP}.$((START_IP + i))\" && 
-        PORT=$((RTSP_CAMERA_STREAM_PORT_BASE + i)) && 
-        PULL_LINES+=\"            pull rtmp://${IP}:${PORT}/stream RTSP;\\n\"; 
-      done && 
-      echo -e \"$PULL_LINES\" > /tmp/generated_pull_lines.log && 
+      PULL_LINES="" && \
+      for i in $(seq 0 $((STREAM_COUNT - 1))); do \
+        IP="${RTSP_CAMERA_STREAM_BASE_IP}.$((START_IP + i))" && \
+        PORT=$((RTSP_CAMERA_STREAM_PORT_BASE + i)) && \
+        PULL_LINES+="            pull rtmp://${IP}:${PORT}/stream RTSP;\\n"; \
+      done && \
+      echo -e "$PULL_LINES" > /tmp/generated_pull_lines.log && \
+      sed -e "s|{{DYNAMIC_PULL_LINES}}|$(echo -e \"$PULL_LINES\")|g" /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf &&
       sed -e 's|{{SERVER_IP_LIVE_STREAMING_SERVER_A}}|${SERVER_IP_LIVE_STREAMING_SERVER_A}|g' \\
           -e 's|{{SERVER_IP_LIVE_STREAMING_SERVER_B}}|${SERVER_IP_LIVE_STREAMING_SERVER_B}|g' \\
-          -e "s|{{SERVER_IP_LIVE_RECORDING_SERVER}}|${SERVER_IP_LIVE_RECORDING_SERVER}|g" \\
+          -e \"s|{{SERVER_IP_LIVE_RECORDING_SERVER}}|${SERVER_IP_LIVE_RECORDING_SERVER}|g\" \\
           -e 's|{{LIVE_PORT_EXPOSE_B}}|${LIVE_PORT_EXPOSE_B}|g' \\
           -e 's|{{RECORDING_EXPOSE_PORT}}|${RECORDING_EXPOSE_PORT}|g' \\
-          -e 's|{{DYNAMIC_PULL_LINES}}|$(echo -e \"$PULL_LINES\")|g' \\
           /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
       "
 
@@ -107,7 +108,7 @@ services:
       "
 
   live-overlay-server:
-    image: gstreamer/gstreamer:latest
+    image: restreamio/gstreamer:x86_64-latest-prod
     build: ./config/live_overlay_server
     container_name: live_overlay_server
     environment:
