@@ -160,20 +160,6 @@ services:
       nginx -g "daemon off"
       '
 
-  video-lan-client-viewer:
-    build: ./config/video_lan_client_viewer
-    container_name: video_lan_client_viewer
-    environment:
-      - SERVER_IP_VIDEO_LAN_CLIENT_VIEWER=${SERVER_IP_VIDEO_LAN_CLIENT_VIEWER}
-    env_file:
-      - ./.env
-    ports:
-      - "8080:8080"
-    networks:
-      live_stream_network:
-        ipv4_address: ${SERVER_IP_VIDEO_LAN_CLIENT_VIEWER}
-    restart: always
-
 networks:
   live_stream_network:
     driver: bridge
