@@ -15,13 +15,22 @@ while true; do
     FILE_PATH_1="${RECORDING_DIR}/${FILENAME_1}"
     FILE_PATH_2="${RECORDING_DIR}/${FILENAME_2}"
 
+    echo "STREAM_URL_B: $STREAM_URL_B"
+    echo "STREAM_URL_A: $STREAM_URL_A"
+    echo "RECORDING_DIR: $RECORDING_DIR"
+    echo "INTERVAL_MINUTES: $INTERVAL_MINUTES"
+    
+    ffmpeg -codecs | grep libx264 > /dev/null 2>&1
+    ffmpeg -codecs | grep aac > /dev/null 2>&1  # redirect to /dev/null to discard
+
+    echo "confirm codecs"
+
     # Record the stream for the interval duration
     echo "Starting recording: ${FILENAME}"
 
     ffmpeg -y \
-    -i "${STREAM_URL_B}" -c:v libx264 -preset ultrafast -c:a aac -strict experimental -t $((INTERVAL_MINUTES * 60)) "${FILE_PATH_1}" \
-    -i "${STREAM_URL_A/live/stream_key_2a}" -c:v libx264 -preset ultrafast -c:a aac -strict experimental -t $((INTERVAL_MINUTES * 60)) "${FILE_PATH_2}"
+    -i "${STREAM_URL_B}/live" -c:v libx264 -preset ultrafast -c:a aac -strict experimental -t $((INTERVAL_MINUTES * 60)) "${FILE_PATH_2}" \
+    -i "${STREAM_URL_A}/live/stream_key_2a" -c:v libx264 -preset ultrafast -c:a aac -strict experimental -t $((INTERVAL_MINUTES * 60)) "${FILE_PATH_1}"
 
     echo "Finished recording stream from ${STREAM_URL_B} to ${STREAM_URL_B}"
-    echo "Finished recording stream from ${STREAM_URL_A} to ${STREAM_URL_A}"
 done

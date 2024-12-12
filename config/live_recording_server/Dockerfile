@@ -1,10 +1,11 @@
-FROM jrottenberg/ffmpeg:4.4-ubuntu
+FROM tigefa/ffmpeg
 
 # Set the working directory
 WORKDIR /stream_config
 
 # Install necessary tools (if additional packages are needed)
 RUN apt-get update && apt-get install -y \
+    bash \
     curl \
     git && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -33,7 +34,7 @@ RUN mkdir -p ${RECORDING_DIR}
 
 # Copy the shell script for recording
 COPY ./stream_config/record_stream.sh .
-RUN chmod +x ./record_stream.sh
+RUN chmod +x record_stream.sh
 
 
 # Expose Ports for RTMP Streaming (optional if RTMP server is handled elsewhere)
@@ -41,3 +42,4 @@ EXPOSE 1935 8080
 
 # Start the recording script
 CMD ["./record_stream.sh"]
+# CMD []
